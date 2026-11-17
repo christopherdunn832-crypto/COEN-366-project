@@ -15,16 +15,20 @@ class Database:
         self.load()
 
     def load(self):
-        self.users = self._load_file("users.json")
-        self.subscriptions = self._load_file("subscriptions.json")
-        self.incidents = self._load_file("incidents.json")
-        self.status_reports = self._load_file("status.json")
+
+        os.makedirs("data", exist_ok=True)
+        self.users = self._load_file("data/users.json")
+        self.subscriptions = self._load_file("data/subscriptions.json")
+        self.incidents = self._load_file("data/incidents.json")
+        self.status_reports = self._load_file("data/status.json")
+
 
     def save(self):
-        self._save_file("users.json", self.users)
-        self._save_file("subscriptions.json", self.subscriptions)
-        self._save_file("incidents.json", self.incidents)
-        self._save_file("status.json", self.status_reports)
+
+        self._save_file("data/users.json", self.users)
+        self._save_file("data/subscriptions.json", self.subscriptions)
+        self._save_file("data/incidents.json", self.incidents)
+        self._save_file("data/status.json", self.status_reports)
 
     def _load_file(self, filename):
         if os.path.exists(filename):
@@ -42,20 +46,32 @@ class Database:
 
     def add_user(self, username, role, ip, udp_port, tcp_port):
         with self.lock:
+
+            if username in self.users:
+                return False
+
             self.users[username] = {
                 "role": role,
                 "ip": ip,
                 "udp_port": udp_port,
                 "tcp_port": tcp_port
             }
+
             self.save()
+            return True
 
     def remove_user(self, username):
         with self.lock:
+
+            if username not in self.users:
+                return False
+
             self.users.pop(username, None)
             self.subscriptions.pop(username, None)
             self.status_reports.pop(username, None)
+
             self.save()
+            return True
 
     # --------------------
     # Subscriptions
@@ -137,9 +153,12 @@ class Database:
     # Recovery Helpers
     # --------------------
 
-    def get_active_incidents(selff):
+    def get_active_incidents(self):
         return {
             incident_id: incident
-            self.incidents.items()
+            for incident_id, incident in self.incidents.items()
             if incident.get("status") != "CLOSED"
         }
+    def generate_incident_id(self):
+
+        return f"INC{len(self.incidents) + 1:03d}"
