@@ -1,6 +1,7 @@
-
 import socket
 import threading
+import json
+
 
 class TCPServer:
 
@@ -26,28 +27,84 @@ class TCPServer:
 
             threading.Thread(
                 target=self.handle_client,
-                args=(client,)
+                args=(client,),
+                daemon=True
             ).start()
 
     def handle_client(self, client):
 
-        message = client.recv(4096).decode()
+        try:
 
-        print("TCP:", message)
+            message = client.recv(4096).decode().strip()
 
-        parts = message.split()
+            print(f"TCP: {message}")
 
-        if parts[0] == "GET_ACTIVE_ALERTS":
+            parts = message.split()
 
-            rq = parts[1]
+            if len(parts) == 0:
+                return
 
-            response = (
-                f"ACTIVE_ALERTS {rq} "
-                f"{len(self.db.incidents)}"
-            )
+            command = parts[0]
+
+            # -------------------------
+            # GET_ACTIVE_ALERTS
+            # -------------------------
+            if command == "GET_ACTIVE_ALERTS":
+
+                rq = parts[1]
+
+                active_alerts = self.db.get_active_incidents()
+
+                response = {
+                    "type": "ACTIVE_ALERTS",
+                    "rq": rq,
+                    "count": len(active_alerts),
+                    "alerts": active_alerts
+                }
+
+                client.send(
+                    json.dumps(response).encode()
+                )
+
+            # -------------------------
+            # ATTACH_REQ
+            # -------------------------
+            elif command == "ATTACH_REQ":
+
+                incident_id = parts[1]
+
+                if incident_id in self.db.incidents:
+
+                    incident = self.db.incidents[incident_id]
+
+                    response = json.dumps({
+                        "status": "OK",
+                        "incident": incident
+                    })
+
+                else:
+
+                    response = json.dumps({
+                        "status": "ERROR",
+                        "message": "Incident not found"
+                    })
+
+                client.send(response.encode())
+
+            else:
+
+                client.send(
+                    b"UNKNOWN_COMMAND"
+                )
+
+        except Exception as e:
+
+            print(f"[TCP ERROR] {e}")
 
             client.send(
-                response.encode()
+                f"ERROR {str(e)}".encode()
             )
 
-        client.close()
+        finally:
+
+            client.close()
