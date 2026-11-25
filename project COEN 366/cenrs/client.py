@@ -73,14 +73,18 @@ def sync_active_alerts(server_address, request_id, name):
     alerts = reply.get("alerts")
     if (
         reply.get("rq") != request_id
-        or not isinstance(alerts, list)
+        or not isinstance(alerts, (dict, list))
         or reply.get("count") != len(alerts)
     ):
         raise ValueError("Invalid ACTIVE_ALERTS request number or record count.")
 
     print(f"Received TCP: ACTIVE_ALERTS {request_id} {len(alerts)}")
-    for alert in alerts:
-        print(json.dumps(alert, ensure_ascii=False))
+    if isinstance(alerts, dict):
+        for incident_id, alert in alerts.items():
+            print(f"{incident_id} {json.dumps(alert, ensure_ascii=False)}")
+    else:
+        for alert in alerts:
+            print(json.dumps(alert, ensure_ascii=False))
 
 
 def run_client(args):
