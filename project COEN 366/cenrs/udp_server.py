@@ -1,5 +1,6 @@
 
 import socket
+from attachment import discover
 
 class UDPServer:
 
@@ -30,132 +31,150 @@ class UDPServer:
 
     def process(self, message, address):
 
-    try:
-        parts = message.split()
+        try:
+            parts = message.split()
 
-        if len(parts) == 0:
-            return
+            if len(parts) == 0:
+                return
 
-        command = parts[0]
+            command = parts[0]
 
-        # -------------------------
-        # REGISTER
-        # -------------------------
-        if command == "REGISTER":
+            # -------------------------
+            # REGISTER
+            # -------------------------
+            if command == "REGISTER":
 
-            rq = parts[1]
-            name = parts[2]
-            role = parts[3]
-            ip = parts[4]
-            udp_port = int(parts[5])
-            tcp_port = int(parts[6])
+                rq = parts[1]
+                name = parts[2]
+                role = parts[3]
+                ip = parts[4]
+                udp_port = int(parts[5])
+                tcp_port = int(parts[6])
 
-            success = self.db.add_user(
-                name,
-                role,
-                ip,
-                udp_port,
-                tcp_port
-            )
-
-            if success:
-                response = (
-                    f"REGISTERED {rq} "
-                    "[HALL EV JMSB LOYOLA SGW ALL] "
-                    "[FIRE SECURITY WEATHER POWER BUILDING GENERAL ALL]"
-                )
-            else:
-                response = (
-                    f"REGISTER-DENIED {rq} "
-                    "Name_Already_Exists"
+                success = self.db.add_user(
+                    name,
+                    role,
+                    ip,
+                    udp_port,
+                    tcp_port
                 )
 
-        # -------------------------
-        # DE-REGISTER
-        # -------------------------
-        elif command == "DE-REGISTER":
+                if success:
+                    response = (
+                        f"REGISTERED {rq} "
+                        "[HALL EV JMSB LOYOLA SGW ALL] "
+                        "[FIRE SECURITY WEATHER POWER BUILDING GENERAL ALL]"
+                    )
+                else:
+                    response = (
+                        f"REGISTER-DENIED {rq} "
+                        "Name_Already_Exists"
+                    )
 
-            rq = parts[1]
-            username = parts[2]
+            # -------------------------
+            # DE-REGISTER
+            # -------------------------
+            elif command == "DE-REGISTER":
 
-            success = self.db.remove_user(username)
+                rq = parts[1]
+                username = parts[2]
 
-            if success:
-                response = f"DE-REGISTERED {rq}"
+                success = self.db.remove_user(username)
+
+                if success:
+                    response = f"DE-REGISTERED {rq}"
+                else:
+                    response = f"DE-REGISTER-DENIED {rq}"
+
+            # -------------------------
+            # SUBSCRIBE
+            # -------------------------
+            elif command == "SUBSCRIBE":
+
+                rq = parts[1]
+                username = parts[2]
+                zone = parts[3]
+                alert_type = parts[4]
+
+                self.db.add_subscription(
+                    username,
+                    zone,
+                    alert_type
+                )
+
+                response = f"SUBSCRIBED {rq}"
+
+            # -------------------------
+            # UNSUBSCRIBE
+            # -------------------------
+            elif command == "UNSUBSCRIBE":
+
+                rq = parts[1]
+                username = parts[2]
+                zone = parts[3]
+                alert_type = parts[4]
+
+                self.db.remove_subscription(
+                    username,
+                    zone,
+                    alert_type
+                )
+
+                response = f"UNSUBSCRIBED {rq}"
+
+            # -------------------------
+            # STATUS_REPORT
+            # -------------------------
+            elif command == "STATUS_REPORT":
+
+                rq = parts[1]
+                username = parts[2]
+                status = parts[3]
+
+                self.db.update_status(
+                    username,
+                    status
+                )
+
+                response = f"STATUS_RECEIVED {rq}"
+
+            # -------------------------
+            # UNKNOWN COMMAND
+            # -------------------------
+            elif command == "ATTACH_REQ":
+                response = discover(self.db, parts, address)
+
+            # Minimal publication bridge until the alert teammate integrates distribution.
+            elif command == "PUBLISH_ALERT":
+                rq = parts[1]
+                with self.db.lock:
+                    publisher = next((n for n, u in self.db.users.items()
+                                      if (u["ip"], u["udp_port"]) == address), None)
+                    if len(parts) != 8 or not publisher or self.db.users[publisher]["role"] not in ("PUBLISHER", "BOTH"):
+                        response = f"ALERT_DENIED {rq} Invalid_Request"
+                    elif parts[4] not in ("INFO", "WARNING", "CRITICAL"):
+                        response = f"ALERT_DENIED {rq} Invalid_Severity"
+                    else:
+                        incident_id = self.db.generate_incident_id()
+                        self.db.incidents[incident_id] = dict(publisher=publisher, category=parts[2], location=parts[3], severity=parts[4], title=parts[5], description=parts[6], attachment=parts[7], version=1, status="ACTIVE")
+                        self.db.save()
+                        response = f"ALERT_ACCEPTED {rq} {incident_id}"
+
             else:
-                response = f"DE-REGISTER-DENIED {rq}"
+                response = "UNKNOWN_COMMAND"
 
-        # -------------------------
-        # SUBSCRIBE
-        # -------------------------
-        elif command == "SUBSCRIBE":
-
-            rq = parts[1]
-            username = parts[2]
-            zone = parts[3]
-            alert_type = parts[4]
-
-            self.db.add_subscription(
-                username,
-                zone,
-                alert_type
+            self.sock.sendto(
+                response.encode(),
+                address
             )
 
-            response = f"SUBSCRIBED {rq}"
+        except Exception as e:
 
-        # -------------------------
-        # UNSUBSCRIBE
-        # -------------------------
-        elif command == "UNSUBSCRIBE":
+            error_message = f"ERROR {str(e)}"
 
-            rq = parts[1]
-            username = parts[2]
-            zone = parts[3]
-            alert_type = parts[4]
-
-            self.db.remove_subscription(
-                username,
-                zone,
-                alert_type
+            self.sock.sendto(
+                error_message.encode(),
+                address
             )
 
-            response = f"UNSUBSCRIBED {rq}"
-
-        # -------------------------
-        # STATUS_REPORT
-        # -------------------------
-        elif command == "STATUS_REPORT":
-
-            rq = parts[1]
-            username = parts[2]
-            status = parts[3]
-
-            self.db.update_status(
-                username,
-                status
-            )
-
-            response = f"STATUS_RECEIVED {rq}"
-
-        # -------------------------
-        # UNKNOWN COMMAND
-        # -------------------------
-        else:
-            response = "UNKNOWN_COMMAND"
-
-        self.sock.sendto(
-            response.encode(),
-            address
-        )
-
-    except Exception as e:
-
-        error_message = f"ERROR {str(e)}"
-
-        self.sock.sendto(
-            error_message.encode(),
-            address
-        )
-
-        print(f"[UDP ERROR] {e}")
-            )
+            print(f"[UDP ERROR] {e}")
